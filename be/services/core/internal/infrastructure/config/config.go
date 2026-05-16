@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,9 @@ type Config struct {
 	// Admin bootstrap — optional; used only on first startup when users table is empty
 	AdminEmail    string
 	AdminPassword string
+
+	// CORS — comma-separated list of allowed frontend origins
+	CORSAllowedOrigins []string
 }
 
 // Load reads all configuration from environment variables.
@@ -92,6 +96,8 @@ func Load() (*Config, error) {
 
 		AdminEmail:    getEnv("ADMIN_EMAIL", ""),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
+
+		CORSAllowedOrigins: getEnvStringSlice("CORS_ALLOWED_ORIGINS", []string{"http://localhost:5173"}),
 	}, nil
 }
 
@@ -139,6 +145,21 @@ func getEnvInt(key string, defaultVal int) (int, error) {
 		return 0, fmt.Errorf("parsing %q=%q as int: %w", key, val, err)
 	}
 	return n, nil
+}
+
+func getEnvStringSlice(key string, defaultVal []string) []string {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	parts := strings.Split(val, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func getEnvDuration(key string, defaultVal time.Duration) (time.Duration, error) {

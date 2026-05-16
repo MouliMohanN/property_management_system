@@ -78,7 +78,7 @@ func run(ctx context.Context, cfg *config.Config, log zerolog.Logger, db *pgxpoo
 
 	// ── Transport ────────────────────────────────────────────────────────────
 	authHandler := handler.NewAuthHandler(registerUC, loginUC, refreshUC, logoutUC, getMeUC, log)
-	srv := transporthttp.NewServer(cfg.ServerPort, authHandler, jwtSvc)
+	srv := transporthttp.NewServer(cfg.ServerPort, authHandler, jwtSvc, cfg.CORSAllowedOrigins)
 
 	// ── Graceful shutdown ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)

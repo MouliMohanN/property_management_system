@@ -15,8 +15,8 @@ type Server struct {
 }
 
 // NewServer constructs a Server and wires up the router.
-func NewServer(port string, authHandler *handler.AuthHandler, tokenSvc auth.TokenService) *Server {
-	router := newRouter(authHandler, tokenSvc)
+func NewServer(port string, authHandler *handler.AuthHandler, tokenSvc auth.TokenService, corsOrigins []string) *Server {
+	router := newRouter(authHandler, tokenSvc, corsOrigins)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

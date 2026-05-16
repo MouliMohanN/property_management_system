@@ -13,9 +13,10 @@ import (
 )
 
 // newRouter builds and returns the chi router with all routes and middleware registered.
-func newRouter(authHandler *handler.AuthHandler, tokenSvc auth.TokenService) http.Handler {
+func newRouter(authHandler *handler.AuthHandler, tokenSvc auth.TokenService, corsOrigins []string) http.Handler {
 	r := chi.NewRouter()
 
+	r.Use(middleware.CORS(corsOrigins))
 	r.Use(chiMiddleware.RealIP)
 	r.Use(chiMiddleware.RequestID)
 	r.Use(chiMiddleware.Recoverer)
