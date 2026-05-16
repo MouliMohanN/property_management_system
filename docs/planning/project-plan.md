@@ -77,17 +77,128 @@ Prerequisites completed before any feature work. Not a "feature phase" — just 
 
 ### Phase 1 — Core Rental Management
 
-| Feature | Concepts |
+Each feature is a self-contained sub-phase. Dependencies flow top-to-bottom — each sub-phase builds on the one above it.
+
+---
+
+#### Phase 1a — User & Auth 🔄 In Progress
+
+**Endpoints**
+
+| Method | Path | Access |
+|---|---|---|
+| `POST` | `/api/v1/auth/register` | admin only |
+| `POST` | `/api/v1/auth/login` | public |
+| `POST` | `/api/v1/auth/refresh` | public (valid refresh token) |
+| `POST` | `/api/v1/auth/logout` | authenticated |
+| `GET` | `/api/v1/auth/me` | authenticated |
+
+**Concepts:** JWT (HMAC-SHA256), refresh token rotation, RBAC (role-only, Phase 1), bcrypt, middleware chains, dockertest integration tests
+
+**Token strategy**
+- Access token: JWT, 15 min TTL, stateless — payload: `{ user_id, role, jti }`
+- Refresh token: opaque 32-byte random string, stored in Redis, 7-day TTL, rotated on every use
+
+**RBAC roles:** `admin`, `landlord`, `tenant`, `maintenance_staff`
+- Phase 1: coarse-grained — role checked per route, no per-resource permissions
+- Phase 2: fine-grained — ownership checks when multi-tenancy is introduced
+
+**Bootstrap:** on startup, if zero users exist, create admin from `ADMIN_EMAIL` + `ADMIN_PASSWORD` env vars
+
+**DB schema**
+```sql
+CREATE TABLE users (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    phone_number  VARCHAR(20)  UNIQUE,
+    password_hash TEXT         NOT NULL,
+    first_name    VARCHAR(100) NOT NULL,
+    last_name     VARCHAR(100) NOT NULL,
+    role          VARCHAR(50)  NOT NULL,
+    status        VARCHAR(50)  NOT NULL DEFAULT 'active',
+    version       INTEGER      NOT NULL DEFAULT 1,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+```
+
+**Milestones**
+
+| Status | Milestone |
 |---|---|
-| User & Auth | JWT, refresh tokens, RBAC, bcrypt, middleware chains |
-| Property CRUD | REST API design, repository pattern, clean architecture layers |
-| Unit/Room Management | Parent-child entity relationships, DB normalization |
-| Tenant Management | Domain modeling, value objects (DDD) |
-| Lease/Rental Agreement | State machines, document lifecycle, optimistic locking |
-| Rent Collection & Invoicing | Financial data modeling, idempotency, double-entry accounting |
-| Maintenance Requests | Event-driven design, status transitions, Kafka pub/sub |
-| Notifications (email/SMS) | Kafka consumers, async processing, retry with backoff |
-| File Uploads (docs, photos) | S3 presigned URLs, multipart upload, CDN patterns |
+| ⬜ | Domain layer — User entity, Role type, UserRepository interface, domain errors |
+| ⬜ | DB migration — `000002_users` |
+| ⬜ | Infrastructure: postgres — `user_repository.go` |
+| ⬜ | Infrastructure: redis — `token_store.go` (refresh token CRUD) |
+| ⬜ | Infrastructure: token — `jwt.go` (generate + validate access tokens) |
+| ⬜ | Use cases — Register, Login, Refresh, Logout, GetMe |
+| ⬜ | Transport — chi router, auth handler, JWT middleware, RBAC middleware |
+| ⬜ | Wire — update `main.go` + `config.go` (JWT secret, token TTLs, admin bootstrap) |
+| ⬜ | Integration tests — dockertest setup, repository tests, use case tests |
+
+**New dependencies**
+- `github.com/go-chi/chi/v5` — router with middleware chain support
+- `github.com/golang-jwt/jwt/v5` — JWT generation + validation
+- `golang.org/x/crypto` — bcrypt
+- `github.com/ory/dockertest/v3` — integration tests against real Postgres + Redis
+- `github.com/go-playground/validator/v10` — request validation
+
+---
+
+#### Phase 1b — Property CRUD ⬜ Not Started
+
+**Concepts:** REST API design, repository pattern, full clean architecture vertical slice, pagination
+
+---
+
+#### Phase 1c — Unit / Room Management ⬜ Not Started
+
+**Concepts:** parent-child entity relationships, DB normalization, cascading state
+
+---
+
+#### Phase 1d — Tenant Management ⬜ Not Started
+
+**Concepts:** domain modeling, value objects (DDD), KYC document workflow
+
+**Extended profile (separate from auth User — linked by user_id)**
+- Employment: employer name, phone, monthly income
+- Identity documents: govt ID, company ID, income proof, address proof (type + number + S3 URL)
+- Emergency contacts (one-to-many)
+- Social/reference links
+- Previous rental: prior address, prior landlord name + phone
+- Background check status (`pending` / `cleared` / `flagged`)
+- PAN number (TDS compliance)
+
+---
+
+#### Phase 1e — Lease / Rental Agreement ⬜ Not Started
+
+**Concepts:** state machines, document lifecycle, optimistic locking
+
+---
+
+#### Phase 1f — Rent Collection & Invoicing ⬜ Not Started
+
+**Concepts:** financial data modeling, idempotency keys, double-entry accounting
+
+---
+
+#### Phase 1g — Maintenance Requests ⬜ Not Started
+
+**Concepts:** event-driven design, status transitions, Kafka pub/sub
+
+---
+
+#### Phase 1h — Notifications ⬜ Not Started
+
+**Concepts:** Kafka consumers, async processing, retry with exponential backoff
+
+---
+
+#### Phase 1i — File Uploads ⬜ Not Started
+
+**Concepts:** S3 presigned URLs, multipart upload, CDN patterns
 
 ---
 
