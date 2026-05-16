@@ -1,0 +1,49 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pms_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-pms_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pms_pass}
+      POSTGRES_DB: ${DB_NAME:-property_mgmt}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pms_user} -d ${DB_NAME:-property_mgmt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - pms_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: pms_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-pms_redis_pass}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-pms_redis_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - pms_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  pms_network:
+    driver: bridge

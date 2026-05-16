@@ -58,7 +58,22 @@ Start focused on **rental management**. Expand to lease management and buy/sell 
 
 ---
 
-## Features & Concepts
+## Phases
+
+### Phase 0 — Foundation ✅
+
+Prerequisites completed before any feature work. Not a "feature phase" — just the ground the system stands on.
+
+| Done | Work |
+|---|---|
+| ✅ | Go workspace + multi-module setup (`be/go.work`) |
+| ✅ | PostgreSQL + Redis (docker-compose, pgxpool, go-redis) |
+| ✅ | golang-migrate setup + first migration (uuid-ossp, pgcrypto) |
+| ✅ | Shared structured logger (zerolog) |
+| ✅ | Config loading from environment variables |
+| ✅ | Application bootstrap with graceful shutdown |
+
+---
 
 ### Phase 1 — Core Rental Management
 
@@ -74,7 +89,11 @@ Start focused on **rental management**. Expand to lease management and buy/sell 
 | Notifications (email/SMS) | Kafka consumers, async processing, retry with backoff |
 | File Uploads (docs, photos) | S3 presigned URLs, multipart upload, CDN patterns |
 
+---
+
 ### Phase 2 — Operational Excellence
+
+Planned after Phase 1 is complete. Exact sequencing within this phase will be determined by real usage patterns and pain points.
 
 | Feature | Concepts |
 |---|---|
@@ -85,7 +104,11 @@ Start focused on **rental management**. Expand to lease management and buy/sell 
 | Rate Limiting | Redis token bucket / sliding window, API gateway integration |
 | Background Jobs | Worker pools, job queues, at-least-once vs exactly-once delivery |
 
+---
+
 ### Phase 3 — Scale & Production Hardening
+
+Planned after Phase 2. Sequencing driven by which scaling bottlenecks surface first.
 
 | Feature | Concepts |
 |---|---|
@@ -94,26 +117,8 @@ Start focused on **rental management**. Expand to lease management and buy/sell 
 | Caching layer | Redis cache-aside pattern, cache invalidation strategies |
 | Distributed tracing | OTEL instrumentation, trace propagation across services |
 | Health checks & metrics | Prometheus metrics, readiness/liveness probes, SLO/SLI |
-| DB migrations | golang-migrate, zero-downtime migrations, blue/green schema changes |
 | Circuit breaker | Resilience patterns, fallback strategies |
 | Config management | AWS Secrets Manager, environment-specific configs, 12-factor app |
-
----
-
-## Build Order
-
-1. Project structure + Go module setup + Go workspace
-2. PostgreSQL setup + golang-migrate
-3. User & Auth service (JWT, RBAC, middleware)
-4. Property + Unit + Tenant domain (CRUD, clean architecture)
-5. Lease lifecycle (state machine, optimistic locking)
-6. Rent collection (idempotency, transactions, financial modeling)
-7. Kafka integration — maintenance requests + notifications
-8. Redis — caching + rate limiting
-9. File uploads — S3 presigned URLs
-10. Extract services from monolith (UMS, Billing, Notifications)
-11. gRPC internal communication between services
-12. OTEL tracing + metrics + health checks
 
 ---
 
