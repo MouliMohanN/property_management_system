@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
@@ -46,46 +50,54 @@ func main() {
 }
 
 // run wires the HTTP server and handles graceful shutdown on OS signals.
-//
-// TODO: Implement this function. Here are the steps:
-//
-//  1. Create a buffered signal channel and subscribe to SIGTERM + SIGINT:
-//       quit := make(chan os.Signal, 1)
-//       signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-//
-//  2. Create a ServeMux and register a health check route:
-//       mux := http.NewServeMux()
-//       mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-//           w.WriteHeader(http.StatusOK)
-//       })
-//
-//  3. Create the HTTP server (do NOT start it yet):
-//       srv := &http.Server{Addr: ":" + cfg.ServerPort, Handler: mux}
-//
-//  4. Start the server in a goroutine (ListenAndServe blocks):
-//       go func() {
-//           if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-//               log.Error().Err(err).Msg("server error")
-//           }
-//       }()
-//       log.Info().Str("port", cfg.ServerPort).Msg("server started")
-//
-//  5. Block until a signal arrives:
-//       <-quit
-//       log.Info().Msg("shutdown signal received")
-//
-//  6. Create a 30-second timeout for in-flight requests to finish, then shut down:
-//       shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-//       defer cancel()
-//       return srv.Shutdown(shutdownCtx)
-//
-// Why this matters: without step 6, a SIGTERM (e.g., from `kubectl rollout`)
-// kills the process instantly — any in-flight HTTP request gets a broken pipe.
-// srv.Shutdown() stops accepting new connections and waits for active ones to
-// finish before returning, giving clients a clean response.
+// It blocks until SIGTERM or SIGINT is received, then drains in-flight requests
+// before returning — allowing main() defers (db.Close, rdb.Close) to run cleanly.
 func run(ctx context.Context, cfg *config.Config, log zerolog.Logger, db *pgxpool.Pool, rdb *goredis.Client) error {
-	// Your implementation here.
-	// Imports you will need: net/http, os, os/signal, syscall, time
-	log.Info().Msg("TODO: implement graceful HTTP server in run()")
-	return nil
+	// Buffered channel of size 1: if the signal arrives before we call <-quit,
+	// the OS can still deliver it without blocking. An unbuffered channel would
+	// silently drop the signal if no goroutine is ready to receive yet.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+
+	mux := http.NewServeMux()
+
+	// Health check endpoint — used by load balancers (ALB, ECS) to decide whether
+	// to route traffic to this instance. Must respond 200 quickly with no side effects.
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	srv := &http.Server{
+		Addr:    ":" + cfg.ServerPort,
+		Handler: mux,
+		// Timeouts prevent slow or malicious clients from holding connections open
+		// indefinitely and exhausting goroutines/file descriptors.
+		ReadTimeout:  10 * time.Second, // max time to read the full request (headers + body)
+		WriteTimeout: 30 * time.Second, // max time to write the full response — matches shutdown grace period
+		IdleTimeout:  60 * time.Second, // max time a keep-alive connection can sit idle between requests
+	}
+
+	// ListenAndServe blocks forever, so it must run in its own goroutine.
+	// Think of it like starting an event loop in JS — it occupies the thread.
+	// http.ErrServerClosed is not a real error; it's how Shutdown() signals
+	// that the server stopped intentionally. Any other error is unexpected.
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("server stopped unexpectedly")
+		}
+	}()
+	log.Info().Str("port", cfg.ServerPort).Msg("server started")
+
+	// Block here until the OS sends SIGTERM (kubectl rollout, ECS task stop)
+	// or SIGINT (Ctrl+C during local dev). Nothing runs past this line until then.
+	<-quit
+	log.Info().Msg("shutdown signal received")
+
+	// Give in-flight requests up to 30 seconds to finish before we force-close.
+	// Without this, active HTTP requests would get a broken pipe mid-response.
+	// The context timeout ensures we don't wait forever if a handler is stuck.
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	return srv.Shutdown(shutdownCtx)
 }
