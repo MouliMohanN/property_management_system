@@ -17,6 +17,10 @@ function setRefreshToken(token: string) {
   localStorage.setItem(REFRESH_TOKEN_KEY, token)
 }
 
+export function hasAccessToken(): boolean {
+  return accessToken !== null
+}
+
 export function clearTokens() {
   accessToken = null
   localStorage.removeItem(REFRESH_TOKEN_KEY)

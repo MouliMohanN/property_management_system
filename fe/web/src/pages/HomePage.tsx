@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMe, logout, refreshTokens, getRefreshToken, clearTokens, ApiError, type User } from '../lib/api'
+import { getMe, logout, refreshTokens, getRefreshToken, hasAccessToken, clearTokens, ApiError, type User } from '../lib/api'
 
 export default function HomePage() {
   const navigate = useNavigate()
@@ -18,8 +18,13 @@ export default function HomePage() {
       }
 
       try {
-        // On page load the in-memory access token is gone — re-issue it silently.
-        await refreshTokens(storedRefreshToken)
+        // Only refresh if the in-memory access token is gone (cold page load / hard refresh).
+        // If it's already in memory (e.g. navigated here from login), skip the round-trip.
+        // This also prevents React StrictMode's double useEffect invocation from consuming
+        // the refresh token twice, which would fail due to server-side rotation.
+        if (!hasAccessToken()) {
+          await refreshTokens(storedRefreshToken)
+        }
         const me = await getMe()
         setUser(me)
       } catch (err) {
