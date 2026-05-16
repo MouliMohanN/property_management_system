@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds all runtime configuration for the core service.
@@ -30,6 +31,15 @@ type Config struct {
 	RedisAddr     string // "host:port"
 	RedisPassword string
 	RedisDB       int // logical DB index (0–15)
+
+	// JWT
+	JWTSecret       string
+	AccessTokenTTL  time.Duration // default 15m
+	RefreshTokenTTL time.Duration // default 168h (7 days)
+
+	// Admin bootstrap — optional; used only on first startup when users table is empty
+	AdminEmail    string
+	AdminPassword string
 }
 
 // Load reads all configuration from environment variables.
@@ -40,9 +50,24 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	jwtSecret, err := requireEnv("JWT_SECRET")
+	if err != nil {
+		return nil, err
+	}
+
 	redisDB, err := getEnvInt("REDIS_DB", 0)
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
+	}
+
+	accessTokenTTL, err := getEnvDuration("ACCESS_TOKEN_TTL", 15*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ACCESS_TOKEN_TTL: %w", err)
+	}
+
+	refreshTokenTTL, err := getEnvDuration("REFRESH_TOKEN_TTL", 7*24*time.Hour)
+	if err != nil {
+		return nil, fmt.Errorf("invalid REFRESH_TOKEN_TTL: %w", err)
 	}
 
 	return &Config{
@@ -60,6 +85,13 @@ func Load() (*Config, error) {
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       redisDB,
+
+		JWTSecret:       jwtSecret,
+		AccessTokenTTL:  accessTokenTTL,
+		RefreshTokenTTL: refreshTokenTTL,
+
+		AdminEmail:    getEnv("ADMIN_EMAIL", ""),
+		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 	}, nil
 }
 
@@ -107,4 +139,16 @@ func getEnvInt(key string, defaultVal int) (int, error) {
 		return 0, fmt.Errorf("parsing %q=%q as int: %w", key, val, err)
 	}
 	return n, nil
+}
+
+func getEnvDuration(key string, defaultVal time.Duration) (time.Duration, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal, nil
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return 0, fmt.Errorf("parsing %q=%q as duration: %w", key, val, err)
+	}
+	return d, nil
 }

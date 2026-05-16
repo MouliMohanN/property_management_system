@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,10 +14,17 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 
+	"github.com/MouliMohanN/property_management_system/be/services/core/internal/domain/user"
 	"github.com/MouliMohanN/property_management_system/be/services/core/internal/infrastructure/config"
+	"github.com/MouliMohanN/property_management_system/be/services/core/internal/infrastructure/password"
 	"github.com/MouliMohanN/property_management_system/be/services/core/internal/infrastructure/postgres"
 	"github.com/MouliMohanN/property_management_system/be/services/core/internal/infrastructure/redis"
+	"github.com/MouliMohanN/property_management_system/be/services/core/internal/infrastructure/token"
+	"github.com/MouliMohanN/property_management_system/be/services/core/internal/transport/http/handler"
+	"github.com/MouliMohanN/property_management_system/be/services/core/internal/usecase/auth"
 	"github.com/MouliMohanN/property_management_system/be/shared/logger"
+
+	transporthttp "github.com/MouliMohanN/property_management_system/be/services/core/internal/transport/http"
 )
 
 func main() {
@@ -49,55 +57,85 @@ func main() {
 	}
 }
 
-// run wires the HTTP server and handles graceful shutdown on OS signals.
-// It blocks until SIGTERM or SIGINT is received, then drains in-flight requests
-// before returning — allowing main() defers (db.Close, rdb.Close) to run cleanly.
 func run(ctx context.Context, cfg *config.Config, log zerolog.Logger, db *pgxpool.Pool, rdb *goredis.Client) error {
-	// Buffered channel of size 1: if the signal arrives before we call <-quit,
-	// the OS can still deliver it without blocking. An unbuffered channel would
-	// silently drop the signal if no goroutine is ready to receive yet.
+	// ── Infrastructure adapters ──────────────────────────────────────────────
+	userRepo := postgres.NewUserRepository(db)
+	tokenStore := redis.NewTokenStore(rdb)
+	jwtSvc := token.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL)
+	hasher := password.NewBcryptHasher()
+
+	// ── Admin bootstrap ──────────────────────────────────────────────────────
+	if err := bootstrapAdmin(ctx, cfg, log, userRepo, hasher); err != nil {
+		return fmt.Errorf("admin bootstrap: %w", err)
+	}
+
+	// ── Use cases ────────────────────────────────────────────────────────────
+	registerUC := auth.NewRegisterUseCase(userRepo, hasher)
+	loginUC := auth.NewLoginUseCase(userRepo, hasher, jwtSvc, tokenStore, cfg.RefreshTokenTTL)
+	refreshUC := auth.NewRefreshUseCase(tokenStore, jwtSvc, cfg.RefreshTokenTTL)
+	logoutUC := auth.NewLogoutUseCase(tokenStore)
+	getMeUC := auth.NewGetMeUseCase(userRepo)
+
+	// ── Transport ────────────────────────────────────────────────────────────
+	authHandler := handler.NewAuthHandler(registerUC, loginUC, refreshUC, logoutUC, getMeUC, log)
+	srv := transporthttp.NewServer(cfg.ServerPort, authHandler, jwtSvc)
+
+	// ── Graceful shutdown ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 
-	mux := http.NewServeMux()
-
-	// Health check endpoint — used by load balancers (ALB, ECS) to decide whether
-	// to route traffic to this instance. Must respond 200 quickly with no side effects.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	srv := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: mux,
-		// Timeouts prevent slow or malicious clients from holding connections open
-		// indefinitely and exhausting goroutines/file descriptors.
-		ReadTimeout:  10 * time.Second, // max time to read the full request (headers + body)
-		WriteTimeout: 30 * time.Second, // max time to write the full response — matches shutdown grace period
-		IdleTimeout:  60 * time.Second, // max time a keep-alive connection can sit idle between requests
-	}
-
-	// ListenAndServe blocks forever, so it must run in its own goroutine.
-	// Think of it like starting an event loop in JS — it occupies the thread.
-	// http.ErrServerClosed is not a real error; it's how Shutdown() signals
-	// that the server stopped intentionally. Any other error is unexpected.
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error().Err(err).Msg("server stopped unexpectedly")
 		}
 	}()
 	log.Info().Str("port", cfg.ServerPort).Msg("server started")
 
-	// Block here until the OS sends SIGTERM (kubectl rollout, ECS task stop)
-	// or SIGINT (Ctrl+C during local dev). Nothing runs past this line until then.
 	<-quit
 	log.Info().Msg("shutdown signal received")
 
-	// Give in-flight requests up to 30 seconds to finish before we force-close.
-	// Without this, active HTTP requests would get a broken pipe mid-response.
-	// The context timeout ensures we don't wait forever if a handler is stuck.
 	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	return srv.Shutdown(shutdownCtx)
+}
+
+// bootstrapAdmin creates the initial admin account when the users table is empty.
+// This is a one-time operation on first deployment. If ADMIN_EMAIL or
+// ADMIN_PASSWORD are not set, a warning is logged and bootstrap is skipped —
+// the system assumes it is already initialised.
+func bootstrapAdmin(ctx context.Context, cfg *config.Config, log zerolog.Logger, userRepo *postgres.UserRepository, hasher *password.BcryptHasher) error {
+	count, err := userRepo.Count(ctx)
+	if err != nil {
+		return fmt.Errorf("counting users: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if cfg.AdminEmail == "" || cfg.AdminPassword == "" {
+		log.Warn().Msg("users table is empty but ADMIN_EMAIL/ADMIN_PASSWORD are not set; skipping admin bootstrap")
+		return nil
+	}
+
+	hash, err := hasher.Hash(cfg.AdminPassword)
+	if err != nil {
+		return fmt.Errorf("hashing admin password: %w", err)
+	}
+
+	admin := &user.User{
+		Email:        cfg.AdminEmail,
+		PasswordHash: hash,
+		FirstName:    "Admin",
+		LastName:     "User",
+		Role:         user.RoleAdmin,
+		Status:       user.StatusActive,
+	}
+
+	if err := userRepo.Create(ctx, admin); err != nil {
+		return fmt.Errorf("creating bootstrap admin: %w", err)
+	}
+
+	log.Info().Str("email", cfg.AdminEmail).Msg("bootstrap admin created")
+	return nil
 }

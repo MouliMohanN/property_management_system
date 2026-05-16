@@ -81,7 +81,7 @@ Each feature is a self-contained sub-phase. Dependencies flow top-to-bottom — 
 
 ---
 
-#### Phase 1a — User & Auth 🔄 In Progress
+#### Phase 1a — User & Auth ✅ Complete
 
 **Endpoints**
 
@@ -126,15 +126,15 @@ CREATE TABLE users (
 
 | Status | Milestone |
 |---|---|
-| ⬜ | Domain layer — User entity, Role type, UserRepository interface, domain errors |
-| ⬜ | DB migration — `000002_users` |
-| ⬜ | Infrastructure: postgres — `user_repository.go` |
-| ⬜ | Infrastructure: redis — `token_store.go` (refresh token CRUD) |
-| ⬜ | Infrastructure: token — `jwt.go` (generate + validate access tokens) |
-| ⬜ | Use cases — Register, Login, Refresh, Logout, GetMe |
-| ⬜ | Transport — chi router, auth handler, JWT middleware, RBAC middleware |
-| ⬜ | Wire — update `main.go` + `config.go` (JWT secret, token TTLs, admin bootstrap) |
-| ⬜ | Integration tests — dockertest setup, repository tests, use case tests |
+| ✅ | Domain layer — User entity, Role type, UserRepository interface, domain errors |
+| ✅ | DB migration — `000002_users` |
+| ✅ | Infrastructure: postgres — `user_repository.go` |
+| ✅ | Infrastructure: redis — `token_store.go` (refresh token CRUD) |
+| ✅ | Infrastructure: token — `jwt.go` (generate + validate access tokens) |
+| ✅ | Use cases — Register, Login, Refresh, Logout, GetMe |
+| ✅ | Transport — chi router, auth handler, JWT middleware, RBAC middleware |
+| ✅ | Wire — update `main.go` + `config.go` (JWT secret, token TTLs, admin bootstrap) |
+| ✅ | Integration tests — dockertest setup, repository tests, use case tests |
 
 **New dependencies**
 - `github.com/go-chi/chi/v5` — router with middleware chain support
